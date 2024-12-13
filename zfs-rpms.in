@@ -1,0 +1,836 @@
+#!/usr/bin/env bash
+#
+# SPDX-License-Identifier: MIT
+#
+# @(#) zfs-rpms
+#
+# SYNOPSIS
+#
+#     Usage: $script_name -a | -s | -c | -i [-C BUILD-ROOT] [OPTIONS]
+#     Available OPTIONS:
+#
+#         --all, -a      Pull/clone OpenZFS BRANCH, pivot to new BRANCH at TAG,
+#                        then build and install ZFS RPMs. This is a shortcut
+#                        for `--sync --compile --install' (default:
+#                        ${_params[all]}).
+#         --branch, -b BRANCH
+#                        Use given OpenZFS BRANCH
+#                        (default: ${_params[initial-branch]}).
+#         -C BUILD-ROOT  Run as if started in BUILD-ROOT.  This option must
+#                        precede others.
+#                        (default: ${_params[working-directory]}).
+#         --compile, -c  Build ZFS RPMs from default TAG of default BRANCH
+#                        (default: ${_params[compile]}).
+#         --force, -f    When compiling, overwrite existing ZFS RPMs, and when
+#                        installing, replace installed RPMs (default: ${_params[force]}).
+#         --help, -h     Display this help message, then exit.
+#         --install, -i  Install ZFS RPMs from default TAG of default BRANCH
+#                        (default: ${_params[install]}).
+#         --pull-request, -p PR[,..]
+#                        Apply pull requests PR to default tag of
+#                        default branch. Implies `--sync'.
+#         --sync, -s     Pull/clone default TAG of default BRANCH of default
+#                        OpenZFS repository (default: ${_params[sync]}).
+#         --tag, -t TAG  Work from given TAG in default BRANCH
+#                        (default: ${_params[initial-tag]}).
+#         --url, -u URL  Sync with OpenZFS repository at given URL
+#                        (default: ${_params[url]}).
+#         --verbose, -v  Display each command before running it.
+#         --version      Display the version of this script, then exit.
+#
+# DESCRIPTION
+#
+#     This script divides the task of building and installing ZFS
+#     point-release RPMs into three steps that can be run separately:
+#     cloning/pulling, including applying any pull requests, building
+#     and installing.
+#
+# EXAMPLES
+#
+#     To clone the latest tag of the latest branch of the default
+#     OpenZFS repository, use:
+#
+#         ./zfs-rpms -s
+#
+#     In this case, the repository is checked out to a directory named
+#     after the default branch under the current directory. To checkout
+#     under another directory, say /opt/src/zfs, use:
+#
+#         ./zfs-rpms -C /opt/src/zfs -s
+#
+#     To sync, build and install ZFS RPMs from the latest tag in the
+#     latest branch, use:
+#
+#         ./zfs-rpms -a
+#
+#     To sync, build and install ZFS RPMs from HEAD of master branch, use:
+#
+#         ./zfs-rpms -a -b master -t HEAD
+#
+# NOTES
+#
+#     1. To save network bandwith, only a single branch of OpenZFS is
+#        cloned (using the GIT flags `--single-branch --filter=tree:0').
+#     2. After installing the RPMs and loading the new ZFS kernel
+#        module, initramfs is rebuilt to update any previous ZFS
+#        module even though this is not currently used by Fedora.
+#
+: ${AWK_CMD:='@AWK_CMD@'}
+: ${CAT_CMD:='@CAT_CMD@'}
+: ${DNF_CMD:='@DNF_CMD@'}
+: ${DRACUT_CMD:='@DRACUT_CMD@'}
+: ${FMT_CMD:='@FMT_CMD@'}
+: ${GETOPT_CMD:='@GETOPT_CMD@'}
+: ${GH_CMD:='@GH_CMD@'}
+: ${GIT_CMD:='@GIT_CMD@'}
+: ${GREP_CMD:='@GREP_CMD@'}
+: ${ID_CMD:='@ID_CMD@'}
+: ${JQ_CMD:='@JQ_CMD@'}
+: ${LS_CMD:='@LS_CMD@'}
+: ${LSINITRD_CMD:='@LSINITRD_CMD@'}
+: ${MAKE_CMD:='@MAKE_CMD@'}
+: ${MODPROBE_CMD:='@MODPROBE_CMD@'}
+: ${MOKUTIL_CMD:='@MOKUTIL_CMD@'}
+: ${PYTHON_CMD:='@PYTHON_CMD@'}
+: ${REALPATH_CMD:='@REALPATH_CMD@'}
+: ${RMDIR_CMD:='@RMDIR_CMD@'}
+: ${RPM_CMD:='@RPM_CMD@'}
+: ${SED_CMD:='@SED_CMD@'}
+: ${SLEEP_CMD:='@SLEEP_CMD@'}
+: ${SUDO_CMD:='@SUDO_CMD@'}
+: ${SYSTEMCTL_CMD:='@SYSTEMCTL_CMD@'}
+: ${TPUT_CMD:='@TPUT_CMD@'}
+: ${UNAME_CMD:='@UNAME_CMD@'}
+: ${ZPOOL_CMD:='/usr/sbin/zpool'}
+
+# Numeric constants.
+: ${COLUMNS:=$($TPUT_CMD cols)}
+: ${PYTHON_CMD_VERSION:="$($PYTHON_CMD --version | $AWK_CMD '{ print $2 }')"}
+: ${SCRIPT_VERSION:='1.0.0'}
+
+usage ()
+{
+    local -n _params=$1
+
+    if test ."${_params[initial-branch]}" = .''; then
+        if ! get-latest-branch parameters; then
+            _params[initial-branch]=zfs-X.Y.Z-release
+        fi
+    fi
+
+    if test ."${_params[initial-tag]}" = .''; then
+        if ! get-latest-tag parameters; then
+            _params[initial-tag]=zfs-X.Y.Z-rcN
+        fi
+    fi
+
+    $CAT_CMD <<EOF
+Usage: $script_name -a | -s | -c | -i [-C BUILD-ROOT] [OPTIONS]
+Available OPTIONS:
+
+    --all, -a      Pull/clone OpenZFS BRANCH, pivot to new BRANCH at TAG,
+                   then build and install ZFS RPMs. This is a shortcut
+                   for `--sync --compile --install' (default:
+                   ${_params[all]}).
+    --branch, -b BRANCH
+                   Use given OpenZFS BRANCH
+                   (default: ${_params[initial-branch]}).
+    -C BUILD-ROOT  Run as if started in BUILD-ROOT.  This option must
+                   precede others.
+                   (default: ${_params[working-directory]}).
+    --compile, -c  Build ZFS RPMs from default TAG of default BRANCH
+                   (default: ${_params[compile]}).
+    --force, -f    When compiling, overwrite existing ZFS RPMs, and when
+                   installing, replace installed RPMs (default: ${_params[force]}).
+    --help, -h     Display this help message, then exit.
+    --install, -i  Install ZFS RPMs from default TAG of default BRANCH
+                   (default: ${_params[install]}).
+    --pull-request, -p PR[,..]
+                   Apply pull requests PR to default tag of
+                   default branch. Implies `--sync'.
+    --sync, -s     Pull/clone default TAG of default BRANCH of default
+                   OpenZFS repository (default: ${_params[sync]}).
+    --tag, -t TAG  Work from given TAG in default BRANCH
+                   (default: ${_params[initial-tag]}).
+    --url, -u URL  Sync with OpenZFS repository at given URL
+                   (default: ${_params[url]}).
+    --verbose, -v  Display each command before running it.
+    --version      Display the version of this script, then exit.
+EOF
+}
+
+error ()
+{
+    {
+        (( $# > 0 )) && echo "$@" || $CAT_CMD -
+    } |
+        $FMT_CMD -tw $(( COLUMNS - 5 )) >&2
+}
+
+confirm ()
+{
+    local prompt=''
+
+    prompt=$(
+        {
+            (( $# > 0 )) && echo "$@" || $CAT_CMD -
+        } |
+            $FMT_CMD -tw $(( COLUMNS - 5 ))
+          ) || return $?
+
+    local reply=''
+
+    while [[ ! ."$reply" =~ \.([Yy]|[Nn]) ]]; do
+        read -t 180 -N 1 -p "$prompt [y|n]? " reply </dev/tty || return $?
+        echo >&2
+    done
+
+    case $reply in
+        [Yy]) return 0 ;;
+        [Nn]) return 1 ;;
+    esac
+}
+
+verify-command-paths ()
+{
+    local -n list=$1
+
+    local cmd
+    local -i missing=0
+
+    for cmd in "${list[@]}"; do
+        if test ."$cmd" = .'ZPOOL_CMD'; then
+
+            # Might not be installed yet...
+            export "$cmd"
+        elif eval test .\"\$$cmd\" = .''; then
+            (( ++missing ))
+            echo "${0##*/}: $cmd: Undefined variable" >&2
+
+        # Assume that number-prefixed values are version numbers.
+        elif eval [[ .\"\$$cmd\" =~ ^\.[0-9] ]]; then
+            export "$cmd"
+        elif ! eval command -v \"\$$cmd\" >/dev/null; then
+            (( ++missing ))
+            eval echo "${0##*/}: \$$cmd: Command missing." >&2
+        else
+            export "$cmd"
+        fi
+    done
+
+    if (( missing > 0 )); then
+        error <<EOF
+
+To install missing commands, run:
+
+  bash -c 'source $0; install-prerequisites'
+
+EOF
+        return 1
+    fi
+}
+
+check-mok-enrollment ()
+{
+    case $($MOKUTIL_CMD --sb-state) in
+        *enabled)
+            if ! $MOKUTIL_CMD --list-enrolled |
+                    $GREP_CMD 'DKMS module' >/dev/null; then
+                $FMT_CMD -w $(( COLUMNS - 5 )) >&2 <<'EOF'
+To install ZFS with  Dynamic Kernel Module Support (DKMS), DKMS's Machine Owner Key (MOK) must first be entrusted to Secure Boot firmware. This is done by "enrolling" the MOK as follows. Run:
+
+    sudo mokutil --import /var/lib/dkms/mok.pub
+
+and create a one-time password that will be used upon reboot:
+
+    sudo systemctl reboot
+
+When prompted by BIOS, select "Enroll MOK", then "Continue" to enroll. Select "Yes" to confirm; enter the password just created, then "Reboot".  Finally, run this script again.
+EOF
+                return 1
+            fi
+            ;;
+    esac
+}
+
+sanity-check-environment ()
+{
+    if test "${BASH_VERSION%%.*}" -lt 5; then
+        echo "${script_name}: This script requires Bash v5 or later." >&2
+        return 1
+    fi
+
+    local -a command_variables=()
+
+    command_variables=(
+        $($SED_CMD -Ene '/^: \$\{([A-Z_][A-Z0-9_]*):.*/s//\1/p' "$0")
+    ) || return $?
+    verify-command-paths command_variables || return $?
+    check-mok-enrollment || return $?
+}
+
+install-prerequisites ()
+{
+    $SUDO_CMD $RPM_CMD -e --nodeps zfs-fuse 2>/dev/null || true
+
+    $SUDO_CMD $DNF_CMD install -y autoconf automake dkms                        \
+              elfutils-libelf-devel fmt gcc gh git                              \
+              kernel-devel-$($UNAME_CMD -r) libaio-devel libattr-devel          \
+              libblkid-devel libcurl-devel libffi-devel libtirpc-devel          \
+              libtool libudev-devel libuuid-devel make mokutil                  \
+              ncompress openssl-devel python3 python3-cffi python3-devel        \
+              python3-packaging python3-setuptools rpm-build zlib-devel
+}
+
+requires-reboot ()
+{
+    $SUDO_CMD $LSINITRD_CMD |
+        $GREP_CMD 'zfs\.ko' >/dev/null
+}
+
+initialize-build-root ()
+{
+    local -n _params=$1
+
+    _params[working-directory]=$($REALPATH_CMD -m "${2:-.}") || return $?
+
+    if [[ ."${_params[working-directory]}" =~                                           \
+           ^\./($|afs|boot|dev|etc|media|mnt|proc|root|run|srv|sys|usr|var) ]]; then
+        echo "$script_name: ${_params[working-directory]}: Permission denied" >&2
+        return 1
+    elif test ! -d "${_params[working-directory]}"; then
+        $SUDO_CMD $INSTALL_CMD -d -m 0755                                       \
+                  -o "$($ID_CMD -un)" -g "$($ID_CMD -gn)"                       \
+                  "${_params[working-directory]}" || return $?
+    fi
+}
+
+initialize-branch ()
+{
+    local -n _params=$1
+
+    if test ."$2" != .''; then
+        _params[initial-branch]=$2
+    elif test ."${_params[initial-branch]}" = .''; then
+        _params[initial-branch]=$(
+            $GIT_CMD ls-remote --branches --sort='version:refname'              \
+                     "${_params[url]}" |
+                $AWK_CMD -F/ 'END { print $NF }'
+              ) || return $?
+    fi
+
+    _params[repo-path]=${_params[working-directory]}/${_params[initial-branch]}
+
+    if test -d "${_params[repo-path]}/.git"; then
+        _params[current-branch]=$(
+            $GIT_CMD -C "${_params[repo-path]}" branch --show-current
+              )
+    else
+        _params[current-branch]=${_params[initial-branch]}
+    fi
+}
+
+describe-branch ()
+{
+    local -n __params=$1
+
+    $GIT_CMD -C "${__params[repo-path]}" describe --tags |
+        $SED_CMD -e 's/-/_/3g'
+}
+
+initialize-tag ()
+{
+    local -n _params=$1
+    local initial_tag=$2
+
+    if test ."$initial_tag" != .''; then
+        _params[initial-tag]=$initial_tag
+    elif test ."${_params[initial-tag]}" = .''; then
+        _params[initial-tag]=$(
+            $GIT_CMD ls-remote  --tags  --sort='version:refname'                \
+                     "${_params[url]}" |
+                $GREP_CMD -Ev '(\.99|\^\{\})$' |
+                $AWK_CMD -F/ 'END { print $NF }'
+              )
+    fi
+
+    if test -d "${_params[repo-path]}/.git"; then
+        _params[current-tag]=$(describe-branch _params) || return $?
+    else
+        _params[current-tag]=${_params[initial-tag]}
+    fi
+}
+
+get-rpm-filename ()
+{
+    local -n _params=$1
+
+    source /etc/os-release
+
+    if test -d "${_params[repo-path]}/.git"; then
+        _params[rpm-filename]=${_params[current-tag]/zfs/zfs-dkms}.fc${VERSION_ID}.noarch.rpm
+    else
+        _params[rpm-filename]=_deferred_
+    fi
+
+    _params[installed-filename]=$(
+        $SUDO_CMD $DNF_CMD list --installed 'zfs-dkms*noarch' 2>/dev/null |
+            $AWK_CMD 'END { split($1, name, ".")
+                            printf "%s-%s.%s.rpm", name[1], $2, name[2]
+                      }'
+           ) || true
+}
+
+sync-zfs-repo ()
+{
+    local -n params=$1
+
+    local tag=${params[current-tag]}
+
+    if test ! -d "${params[repo-path]}/.git"; then
+        $GIT_CMD clone --single-branch --filter=tree:0                          \
+                 -b "${params[initial-branch]}" "${params[url]}"                \
+                 "${params[repo-path]}" || return $?
+    else
+        $GIT_CMD -C "${params[repo-path]}" pull --rebase || return $?
+        initialize-tag params || return $?
+        tag=${params[current-tag]}
+    fi
+
+    pushd "${params[repo-path]}" >/dev/null || return $?
+    trap 'popd; exit 1' 0 1 2 15 RETURN
+
+    local new_branch=''
+
+    # First time initial tag given, create new branch.
+    if test ."$tag" = .'HEAD'; then
+        if test ."${params[current-branch]}" = ."${params[initial-branch]}"; then
+            new_branch=$(describe-branch params) || return $?
+            $GIT_CMD switch --create "$new_branch" "$tag" || return $?
+            $GIT_CMD branch                                                     \
+                     --set-upstream-to="origin/${params[initial-branch]}"       \
+                     "$new_branch" || return $?
+        fi
+    elif test ! -f "${params[repo-path]}/.git/refs/heads/${tag}"; then
+        new_branch=$tag
+
+        if $GIT_CMD tag --list | $GREP_CMD "$tag" >/dev/null; then
+            $GIT_CMD switch --create "$new_branch" "tags/${tag}" || return $?
+        else
+            $GIT_CMD switch --create "$new_branch" || return $?
+        fi
+
+        $GIT_CMD branch                                                         \
+                 --set-upstream-to="origin/${params[initial-branch]}"           \
+                 "$new_branch" || return $?
+    fi
+
+    popd >/dev/null
+    trap - 0 1 2 15 RETURN
+}
+
+apply-pull-requests ()
+{
+    local -n params=$1
+
+    local -a prs=( $(IFS=','; set -- ${params[pull-request]}; echo "$@") )
+    local -a pr_branches=()
+    local -a pr_commits=()
+    local -i commit_count=0
+    local head_ref_name=''
+    local pr=''
+
+    pushd "${params[repo-path]}" >/dev/null || return $?
+    trap 'popd; exit 1' 0 1 2 15 RETURN
+
+    # Each PR is checked out to headRefName branch.
+    for pr in "${prs[@]}"; do
+        $GH_CMD co "$pr" --force || return $?
+        pr_fields=$($GH_CMD pr view "$pr" --json 'commits,headRefName') || return $?
+        commit_count=$($JQ_CMD '.commits|length' <<<"$pr_fields") || return $?
+        head_ref_name=$($JQ_CMD -r .headRefName <<<"$pr_fields") || return $?
+        pr_branches+=( "$head_ref_name" )
+        pr_commits+=( "$commit_count" )
+    done
+
+    # Create branch to merge PRs.
+    local merged_branch=$(IFS=+; echo "${prs[*]}")
+
+    if (( ${#merged_branch} > 10 )); then
+        merged_branch=${prs[0]}-${prs[-1]}
+    fi
+
+    merged_branch=${params[current-tag]}+${merged_branch}
+
+    if test -f ".git/refs/heads/${merged_branch}"; then
+        confirm "Overwrite existing branch ${merged_branch}" || return $?
+        $GIT_CMD branch -D "$merged_branch" || return $?
+    fi
+
+    $GIT_CMD switch "${params[current-branch]}" || return $?
+    $GIT_CMD switch --create  "$merged_branch" || return $?
+    $GIT_CMD branch --set-upstream-to="origin/${params[initial-branch]}"        \
+             "$merged_branch" || return $?
+
+    local -i i=0
+
+    echo "*** Enter git credentials to enable cherry-picking..." >&2
+
+    for i in "${!pr_commits[@]}"; do
+        echo "*** Applying pull request ${prs[i]} to branch ${merged_branch}..." >&2
+        $GIT_CMD cherry-pick -X ort --strategy-option=ours \
+                 "${pr_branches[i]}~${pr_commits[i]}".."${pr_branches[i]}" || return $?
+    done
+
+    # If PR commit message of the form: `Tag X.Y.Z-rcN' exists, then
+    # create a tag for it (these commits already update META).
+    pr_tag_msg=$($GIT_CMD log --grep='Tag [0-9.rc-]\{1,\}' -n 1)
+    pr_tag=zfs-$($SED_CMD -Ene '/.*Tag ([0-9.rc-]+).*/s//\1/p' <<<"$pr_tag_msg")
+    if ! $GIT_CMD log -n1 "tags/${pr_tag}" &>/dev/null; then
+        pr_tagged_commit=$($SED_CMD -Ene '/^commit ([0-9a-f]{9}).*/s//\1/p' <<<"$pr_tag_msg")
+        $GIT_CMD tag -m "$pr_tag" "$pr_tag" "$pr_tagged_commit" || return $?
+    fi
+
+    # if ! $GREP_CMD -q 'git describe.*| sed' scripts/make_gitrev.sh; then
+
+    #     # Make `git describe' compatible with rpmbuild.
+    #     echo "Enter git credentials to adjust ZFS Release..." >&2
+
+    #     $SED_CMD -i -e '/git describe/s!;! | sed -e "s/-/_/3g";!' scripts/make_gitrev.sh || return $?
+    #     $GIT_CMD add scripts/make_gitrev.sh || return $?
+    #     $GIT_CMD commit -m $'Make git-describe compatible with rpmbuild.'
+    # fi
+
+    local tag=''
+
+    tag=$(describe-branch params) || return $?
+    $GIT_CMD branch -m "$tag" || return $?
+    params[current-tag]=$tag
+
+    popd >/dev/null
+    trap - 0 1 2 15 RETURN
+}
+
+build-zfs-rpms ()
+{
+    local -n params=$1
+
+    pushd "${params[repo-path]}" >/dev/null || return $?
+    trap 'popd; exit 1' 0 1 2 15 RETURN
+
+    $GIT_CMD clean -fdx || return $?
+    ./autogen.sh || return $?
+    ./configure PYTHON="$PYTHON_CMD" PYTHON_VERSION="$PYTHON_CMD_VERSION"       \
+        || return $?
+    $MAKE_CMD -j1 rpm-utils rpm-dkms || return $?
+    get-rpm-filename params || return $?
+
+    popd >/dev/null
+    trap - 0 1 2 15 RETURN
+}
+
+install-zfs-rpms ()
+{
+    local -n params=$1
+
+    pushd "${params[repo-path]}" >/dev/null || return $?
+    trap 'popd; exit 1' 0 1 2 15 RETURN
+
+    if command -v $ZPOOL_CMD >/dev/null; then
+        $SUDO_CMD $ZPOOL_CMD export -a || return $?
+    fi
+
+    local install_prefix=''
+
+    if test ."${params[rpm-filename]}" = ."${params[installed-filename]}"; then
+        install_prefix=re
+    fi
+
+    local rebuild_initramfs=false
+
+    case $($SUDO_CMD $MODPROBE_CMD -r zfs 2>&1) in
+        *'in use'*)
+
+            # Can't remove ZFS kernel module => ZFS in initramfs.
+            rebuild_initramfs=true
+            $SUDO_CMD $DNF_CMD remove -y libnvpair* libuutil* libzfs*           \
+                      libzpool* zfs-dkms zfs-debuginfo*  zfs-test*
+            $SUDO_CMD $DNF_CMD install -y $(
+                $LS_CMD ./*$($UNAME_CMD -m).rpm ./*noarch.rpm |
+                    $GREP_CMD -Ev 'debug|src'
+                      ) || return $?
+            ;;
+        *)
+            $SUDO_CMD $DNF_CMD "${install_prefix}install" -y $(
+                $LS_CMD ./*$($UNAME_CMD -m).rpm ./*noarch.rpm |
+                    $GREP_CMD -Ev 'debug|src'
+                      ) || return $?
+            ;;
+    esac
+
+    popd >/dev/null
+    trap - 0 1 2 15 RETURN
+
+    if $rebuild_initramfs; then
+        trap '' 2 15
+
+        echo "Rebuilding initramfs, please wait..." >&2
+        $SUDO_CMD $DRACUT_CMD --force || return $?
+
+        trap - 2 15
+
+        if confirm "Ready to restart system"; then
+            $SLEEP_CMD 10
+            $SUDO_CMD $SYSTEMCTL_CMD reboot
+        fi
+    else
+        $SUDO_CMD $MODPROBE_CMD zfs 2>/dev/null || return $?
+        $SUDO_CMD $ZPOOL_CMD import || return $?
+    fi
+}
+
+confirm-request ()
+{
+    local -n params=$1
+
+    declare -A msg=(
+        [all]="Clone/pull OpenZFS ${params[initial-tag]} of branch ${params[initial-branch]}, and then build and install RPMs"
+        [sync]="Clone/pull (only) OpenZFS ${params[initial-tag]} of branch ${params[initial-branch]}"
+        [compile]="Build (only) RPMs from ${params[initial-tag]} of branch ${params[initial-branch]}"
+        [sync+compile]="Clone/pull OpenZFS ${params[initial-tag]} of branch ${params[initial-branch]}, and then build (without installing) RPMs"
+        [sync+install]="Clone/pull OpenZFS ${params[initial-tag]} of branch ${params[initial-branch]}, and then install (without building) RPMs"
+        [compile+install]="Build and install (without pulling) OpenZFS RPMs from ${params[initial-tag]} of branch ${params[initial-branch]}"
+        [install]="Install (only) OpenZFS RPMs from ${params[initial-tag]} of branch ${params[initial-branch]}"
+        [rebuild-initramfs]="Rebuild initramfs and restart system"
+    )
+    declare -A err_msg=(
+        [exists]="${script_name}: ${params[current-tag]} RPMs already exist; Use --force to override."
+        [not-synced]="${script_name}: Missing OpenZFS repository. Use --sync to clone."
+        [installed]="${script_name}: ${params[current-tag]} RPMs already installed; Use --force to override."
+        [none]="${script_name}: No RPMs to install; Use option --compile to build first."
+    )
+
+    if test ."${params[pull-request]}" != .''; then
+        msg[all]="Apply pull request(s) to ${params[current-tag]} of branch ${params[current-branch]}, and then build and install RPMs"
+        msg[sync]="Apply (only) pull request(s) to ${params[current-tag]} of branch ${params[current-branch]}"
+        msg[sync+compile]="Apply pull request(s) to ${params[current-tag]} of branch ${params[current-branch]}, and then build (without installing) RPMs"
+        msg[sync+install]="Apply pull request(s) to ${params[current-tag]} of branch ${params[current-branch]}, and install (without building) RPMs"
+    fi
+
+    if ${params[compile]} || ${params[all]}                                     \
+                && test -f "${params[repo-path]}/${params[rpm-filename]}"       \
+                && test ."${params[pull-request]}" = .''                        \
+                && ! ${params[force]}; then
+        error "${err_msg[exists]}"
+        return 1
+    elif ${params[compile]} && ! ${params[sync]}                                \
+            && test ."${params[pull-request]}" = .''                            \
+            && test ! -d "${params[repo-path]}/.git"; then
+        error "${err_msg[not-synced]}"
+        return 2
+    elif ${params[install]} || ${params[all]}                                           \
+                && test ."${params[rpm-filename]}" = ."${params[installed-filename]}"   \
+                && ! ${params[force]}; then
+        error "${err_msg[installed]}"
+        return 3
+    elif ${params[install]} && ! ${params[compile]}                                     \
+                && test ! -f "${params[repo-path]}/${params[rpm-filename]}"; then
+        error "${err_msg[none]}"
+        return 4
+    fi
+
+    if ${params[all]}; then
+        confirm "${msg[all]}" || return $?
+        if requires-reboot; then
+            confirm "${msg[rebuild-initramfs]}" || return $?
+        fi
+    elif ${params[sync]} && ${params[compile]}; then
+        confirm "${msg[sync+compile]}" || return $?
+    elif ${params[sync]} && ${params[install]}; then
+        confirm "${msg[sync+install]}" || return $?
+        if requires-reboot; then
+            confirm "${msg[rebuild-initramfs]}" || return $?
+        fi
+    elif ${params[compile]} ${params[install]}; then
+        confirm "${msg[compile+install]}" || return $?
+    elif ${params[sync]}; then
+        confirm "${msg[sync]}" || return $?
+    elif ${params[compile]}; then
+        confirm "${msg[compile]}" || return $?
+    elif ${params[install]}; then
+        confirm "${msg[install]}" || return $?
+        if requires-reboot; then
+            confirm "${msg[rebuild-initramfs]}" || return $?
+        fi
+    fi
+}
+
+parse-command-line ()
+{
+    local -n params=$1
+
+    local args
+    local -r shortopts=ab:C:cfhip:st:u:v
+    local -r longopts=all,branch:,compile,force,help,install,pull-request:,sync,tag:,url:,verbose,version
+
+    shift
+    if ! args=$(
+            $GETOPT_CMD --shell bash --options "$shortopts"                     \
+                        --longoptions "$longopts" --name "$script_name" -- "$@"
+         ); then
+        usage params
+        return 1
+    fi
+
+    eval set -- "$args"
+    unset args
+
+    local -i arg_count=$#
+
+    while true; do
+        case $1 in
+            --a*|-a)      # --all (i.e.: --sync --compile --install)
+                params[all]=true
+                ;;
+            --b*|-b)      # --branch BRANCH
+                initialize-branch params "$2" || return $?
+                shift
+                ;;
+            -C)           # -C BUILD-ROOT
+                initialize-build-root params "$2" || return $?
+                shift
+                ;;
+            --c*|-c)      # --compile
+                params[compile]=true
+                ;;
+            --f*|-f)      # --force
+                params[force]=true
+                ;;
+            --h*|-h)      # --help
+                usage params
+                exit 0
+                ;;
+            --i*|-i)      # --install
+                params[install]=true
+                ;;
+            --p*|-p)      # --pull-request PR[,...]
+                params[pull-request]+=" $2 "
+                if (( $? != 0 )); then
+                    return 1
+                fi
+                params[sync]=true
+                shift
+                ;;
+            --s*|-s)      # --sync
+                params[sync]=true
+                ;;
+            --t*|-t)      # --tag TAG
+                initialize-tag params "$2" || return $?
+                shift
+                ;;
+            --u*|-u)      # --url URL
+                params[url]=$2
+                shift
+                ;;
+            --verb*|-v)   # --verbose
+                set -x
+                ;;
+            --vers*)      # --version
+                echo "$script_version" >&2
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+        esac
+        shift
+    done
+
+    if ${params[sync]} && ${params[compile]} && ${params[install]}; then
+        params[all]=true
+    elif ! { ${params[sync]} || ${params[compile]}                              \
+               || ${params[install]} || ${params[all]}; }; then
+        usage params
+        return 1
+    fi
+}
+
+main ()
+{
+    set -o pipefail
+    shopt -u nullglob
+
+    local script=''
+    local script_name=''
+    local script_version=''
+
+    script=$($REALPATH_CMD -e "$0") || return $?
+    script_name=${script##*/}
+    script_version="${script_name} v${SCRIPT_VERSION}"
+
+    local -A parameters=(
+        [all]=false
+        [initial-branch]=''
+        [current-branch]=''
+        [compile]=false
+        [compile+install]=false
+        [force]=false
+        [install]=false
+        [installed-filename]=''
+        [pull-request]=''
+        [repo-path]=''
+        [rpm-filename]=''
+        [sync]=false
+        [sync+compile]=false
+        [sync+install]=false
+        [initial-tag]=''
+        [current-tag]=''
+        [url]='https://github.com/openzfs/zfs.git'
+        [working-directory]=''
+    )
+
+    initialize-build-root parameters || return $?
+    parse-command-line parameters "$@" || return $?
+
+    if test ."${parameters[initial-branch]}" = .''; then
+        initialize-branch parameters || return $?
+    fi
+
+    if test ."${parameters[initial-tag]}" = .''; then
+        initialize-tag parameters || return $?
+    fi
+
+    if ! get-rpm-filename parameters                                            \
+            || ! confirm-request parameters; then
+        local status=$?
+
+        $RMDIR_CMD --ignore-fail-on-non-empty                                   \
+                   "${parameters[working-directory]}" || true
+        return $status
+    fi
+
+    if ${parameters[sync]} || ${parameters[all]}; then
+        sync-zfs-repo parameters || return $?
+
+        if test ."${parameters[pull-request]}" != .''; then
+            apply-pull-requests parameters || return $?
+        fi
+    fi
+
+    if ${parameters[compile]} || ${parameters[all]}; then
+        install-prerequisites || return $?
+        build-zfs-rpms parameters || return $?
+        echo "${parameters[repo-path]}:" >&2
+        $LS_CMD "${parameters[repo-path]}"/*.rpm |
+            $SED_CMD -e 's;.*/;\t;' >&2 || return $?
+    fi
+
+    if ${parameters[install]} || ${parameters[all]}; then
+        install-zfs-rpms parameters || return $?
+    fi
+}
+
+if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    sanity-check-environment && main "$@"
+fi
