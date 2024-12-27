@@ -77,6 +77,7 @@
 #
 : ${AWK_CMD:='@AWK_CMD@'}
 : ${CAT_CMD:='@CAT_CMD@'}
+: ${DKMS_CMD:='@DKMS_CMD@'}
 : ${DNF_CMD:='@DNF_CMD@'}
 : ${DRACUT_CMD:='@DRACUT_CMD@'}
 : ${FMT_CMD:='@FMT_CMD@'}
@@ -236,6 +237,11 @@ check-mok-enrollment ()
         *enabled)
             if ! $MOKUTIL_CMD --list-enrolled |
                     $GREP_CMD 'DKMS module' >/dev/null; then
+
+                if test ! -f /var/lib/dkms/mok.pub; then
+                    $SUDO_CMD $DKMS_CMD generate_mok || return $?
+                fi
+
                 $FMT_CMD -w $(( COLUMNS - 5 )) >&2 <<'EOF'
 To install ZFS with  Dynamic Kernel Module Support (DKMS), DKMS's Machine Owner Key (MOK) must first be entrusted to Secure Boot firmware. This is done by "enrolling" the MOK as follows. Run:
 
@@ -313,7 +319,7 @@ initialize-branch ()
         _params[initial-branch]=$2
     elif test ."${_params[initial-branch]}" = .''; then
         _params[initial-branch]=$(
-            $GIT_CMD ls-remote --branches --sort='version:refname'              \
+            $GIT_CMD ls-remote --heads --sort='version:refname'              \
                      "${_params[url]}" |
                 $AWK_CMD -F/ 'END { print $NF }'
               ) || return $?

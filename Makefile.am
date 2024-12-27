@@ -27,7 +27,7 @@ rpms: zfs-rpms
 	    $${PRS:+-p "$${PRS}"}					\
 	    $${FORCE+-f}						\
 	    $${VERBOSE+-v}						\
-	    -sc >&2 2>&1 |							\
+	    -sc >&2 2>&1 |						\
 	    sed -e 's/--force/FORCE=/'
 
 install-rpms:

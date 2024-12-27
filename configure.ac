@@ -1,7 +1,7 @@
 # configure.ac: Autoconf template for zfs-rpms.  -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-AC_PREREQ([2.71])
+AC_PREREQ([2.69])
 AC_INIT([zfs-rpms], [1.0.0], [])
 AM_INIT_AUTOMAKE([foreign])
 
@@ -36,6 +36,7 @@ OPT_PREFIX=${OPT_PREFIX:+"${OPT_PREFIX}${PATH_SEPARATOR}"}
 AC_PATH_PROGS([AWK_CMD],        [gawk awk],           [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([CAT_CMD],        [gcat cat],           [], [${OPT_PREFIX}${PATH}])
 
+AC_PATH_PROG([DKMS_CMD],        [dkms],           [], [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([DNF_CMD],         [dnf],            [], [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([DRACUT_CMD],      [dracut],         [], [], [${OPT_PREFIX}${PATH}])
 
