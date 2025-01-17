@@ -80,6 +80,7 @@
 : ${DKMS_CMD:='@DKMS_CMD@'}
 : ${DNF_CMD:='@DNF_CMD@'}
 : ${DRACUT_CMD:='@DRACUT_CMD@'}
+: ${FIND_CMD:='@FIND_CMD@'}
 : ${FMT_CMD:='@FMT_CMD@'}
 : ${GETOPT_CMD:='@GETOPT_CMD@'}
 : ${GH_CMD:='@GH_CMD@'}
@@ -319,8 +320,9 @@ initialize-branch ()
         _params[initial-branch]=$2
     elif test ."${_params[initial-branch]}" = .''; then
         _params[initial-branch]=$(
-            $GIT_CMD ls-remote --heads --sort='version:refname'              \
+            $GIT_CMD ls-remote --heads --sort='version:refname' \
                      "${_params[url]}" |
+                $GREP_CMD -v 'staging$' |
                 $AWK_CMD -F/ 'END { print $NF }'
               ) || return $?
     fi
@@ -351,6 +353,8 @@ initialize-tag ()
 
     if test ."$initial_tag" != .''; then
         _params[initial-tag]=$initial_tag
+    elif [[ ."${_params[initial-branch]}" =~ ^\..*-release$ ]]; then
+        _params[initial-tag]=HEAD
     elif test ."${_params[initial-tag]}" = .''; then
         _params[initial-tag]=$(
             $GIT_CMD ls-remote  --tags  --sort='version:refname'                \
@@ -361,6 +365,27 @@ initialize-tag ()
     fi
 
     if test -d "${_params[repo-path]}/.git"; then
+        local tag_msg=''
+        local tag=''
+
+        # If commit message of the form: `Tag X.Y.Z-N' exists, then
+        # create a tag for it (these commits already update META).
+        tag_msg=$(
+            $GIT_CMD -C "${_params[repo-path]}" \
+                     log --grep='Tag [0-9.-]\{1,\}' -n 1
+               )
+        tag=zfs-$($SED_CMD -Ene '/.*Tag ([0-9.-]+).*/s//\1/p' <<<"$tag_msg")
+        if test ."$tag" != .'' \
+                && ! $GIT_CMD -C "${_params[repo-path]}" \
+                     log -n1 "tags/${tag}" &>/dev/null; then
+            tagged_commit=$(
+                $SED_CMD -Ene '/^commit ([0-9a-f]{9}).*/s//\1/p' <<<"$tag_msg"
+                         )
+            $GIT_CMD -C "${_params[repo-path]}" tag -m "$tag" "$tag" \
+                     "$tagged_commit" || return $?
+
+        fi
+
         _params[current-tag]=$(describe-branch _params) || return $?
     else
         _params[current-tag]=${_params[initial-tag]}
@@ -374,7 +399,15 @@ get-rpm-filename ()
     source /etc/os-release
 
     if test -d "${_params[repo-path]}/.git"; then
-        _params[rpm-filename]=${_params[current-tag]/zfs/zfs-dkms}.fc${VERSION_ID}.noarch.rpm
+        local rpm_file=''
+        local pattern="${_params[current-tag]/zfs/zfs-dkms}*.fc${VERSION_ID}.noarch.rpm"
+
+        rpm_file=$($FIND_CMD "${_params[repo-path]}" -name "$pattern")
+        if test -f "$rpm_file"; then
+            _params[rpm-filename]=${rpm_file##*/}
+        else
+            _params[rpm-filename]=${_params[current-tag]/zfs/zfs-dkms}.fc${VERSION_ID}.noarch.rpm
+        fi
     else
         _params[rpm-filename]=_deferred_
     fi
@@ -488,11 +521,15 @@ apply-pull-requests ()
                  "${pr_branches[i]}~${pr_commits[i]}".."${pr_branches[i]}" || return $?
     done
 
+    local pr_tag_msg=''
+    local pr_tag=''
+
     # If PR commit message of the form: `Tag X.Y.Z-rcN' exists, then
     # create a tag for it (these commits already update META).
     pr_tag_msg=$($GIT_CMD log --grep='Tag [0-9.rc-]\{1,\}' -n 1)
     pr_tag=zfs-$($SED_CMD -Ene '/.*Tag ([0-9.rc-]+).*/s//\1/p' <<<"$pr_tag_msg")
-    if ! $GIT_CMD log -n1 "tags/${pr_tag}" &>/dev/null; then
+    if test ."$pr_tag" != .'' \
+            && ! $GIT_CMD log -n1 "tags/${pr_tag}" &>/dev/null; then
         pr_tagged_commit=$($SED_CMD -Ene '/^commit ([0-9a-f]{9}).*/s//\1/p' <<<"$pr_tag_msg")
         $GIT_CMD tag -m "$pr_tag" "$pr_tag" "$pr_tagged_commit" || return $?
     fi

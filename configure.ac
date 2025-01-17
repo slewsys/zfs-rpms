@@ -40,6 +40,7 @@ AC_PATH_PROG([DKMS_CMD],        [dkms],           [], [], [${OPT_PREFIX}${PATH}]
 AC_PATH_PROG([DNF_CMD],         [dnf],            [], [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([DRACUT_CMD],      [dracut],         [], [], [${OPT_PREFIX}${PATH}])
 
+AC_PATH_PROGS([FIND_CMD],       [gfind find],         [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([FMT_CMD],        [gfmt fmt],           [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROG([GETOPT_CMD],      [getopt],         [], [], [${OPT_PREFIX}${PATH}])
