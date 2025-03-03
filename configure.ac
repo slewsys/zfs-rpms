@@ -8,8 +8,8 @@ AM_INIT_AUTOMAKE([foreign])
 USR_PREFIX=/usr/sbin${PATH_SEPARATOR}/usr/bin${PATH_SEPARATOR}
 LOCAL_PREFIX=/usr/local/sbin${PATH_SEPARATOR}/usr/local/bin${PATH_SEPARATOR}
 
-AC_ARG_VAR([ZFS_BRANCH], "Branch of OpenZFS repository to clone")
-AC_ARG_VAR([ZFS_TAG], "Tag/HEAD of OpenZFS branch to checkout")
+AC_ARG_VAR([ZFS_BRANCH], [Branch of OpenZFS repository to clone])
+AC_ARG_VAR([ZFS_TAG], [Tag/HEAD of OpenZFS branch to checkout])
 
 AC_MSG_CHECKING([whether to search optional path])
 AC_ARG_WITH([opt-path],
