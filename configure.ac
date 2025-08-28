@@ -5,8 +5,9 @@ AC_PREREQ([2.69])
 AC_INIT([zfs-rpms], [1.0.0], [])
 AM_INIT_AUTOMAKE([foreign])
 
-USR_PREFIX=/usr/sbin${PATH_SEPARATOR}/usr/bin${PATH_SEPARATOR}
+HOME_PREFIX=${HOME}/bin${PATH_SEPARATOR}
 LOCAL_PREFIX=/usr/local/sbin${PATH_SEPARATOR}/usr/local/bin${PATH_SEPARATOR}
+USR_PREFIX=/usr/sbin${PATH_SEPARATOR}/usr/bin${PATH_SEPARATOR}
 
 AC_ARG_VAR([ZFS_BRANCH], [Branch of OpenZFS repository to clone])
 AC_ARG_VAR([ZFS_TAG], [Tag/HEAD of OpenZFS branch to checkout])
@@ -33,6 +34,8 @@ AC_SUBST([OPT_PATHS], ["$OPT_PATHS"])
 OPT_PREFIX=${OPT_PREFIX:+"${OPT_PREFIX}${PATH_SEPARATOR}"}
 
 # Checks for programs.
+AC_PATH_PROG([ARCH_CMD],        [arch],           [], [], [${OPT_PREFIX}${PATH}])
+
 AC_PATH_PROGS([AWK_CMD],        [gawk awk],           [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([CAT_CMD],        [gcat cat],           [], [${OPT_PREFIX}${PATH}])
 
@@ -58,12 +61,17 @@ AC_PATH_PROGS([LS_CMD],         [gls ls],             [], [${OPT_PREFIX}${PATH}]
 AC_PATH_PROG([LSINITRD_CMD],    [lsinitrd],       [], [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([MAKE_CMD],       [gmake make],         [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROGS([MKTEMP_CMD],     [gmktemp mktemp],     [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROG([MODPROBE_CMD],    [modprobe],       [], [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([MOKUTIL_CMD],     [mokutil],        [], [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([PYTHON_CMD],      [python],         [], [], [${USR_PREFIX}${PATH}])
 
 AC_PATH_PROGS([REALPATH_CMD],   [grealpath realpath], [], [${OPT_PREFIX}${PATH}])
+
+AC_PATH_PROG([RESTART_CMD],     [restart],         [], [], [${HOME_PREFIX}${PATH}])
+
+AC_PATH_PROGS([RM_CMD],         [grm rm],             [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([RMDIR_CMD],      [grmdir rmdir],       [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROG([RPM_CMD],         [rpm],            [], [], [${OPT_PREFIX}${PATH}])
@@ -77,6 +85,8 @@ AC_PATH_PROG([TPUT_CMD],        [tput],           [], [], [${OPT_PREFIX}${PATH}]
 AC_PATH_PROGS([UNAME_CMD],      [uname],          [], [], [${OPT_PREFIX}${PATH}])
 
 AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([enroll-mok],                         [chmod +x enroll-mok])
+AC_CONFIG_FILES([install-dependencies],               [chmod +x install-dependencies])
 AC_CONFIG_FILES([zfs-rpms],                           [chmod +x zfs-rpms])
 
 AC_OUTPUT

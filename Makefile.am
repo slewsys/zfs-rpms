@@ -20,6 +20,7 @@ rpms: zfs-rpms
 	@ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT);				\
 	ZFS_BRANCH=$(ZFS_BRANCH);					\
 	ZFS_TAG=$(ZFS_TAG);						\
+	set -o pipefail;                                                \
 	$(BUILD_DIR)zfs-rpms						\
 	    $${ZFS_BUILD_ROOT:+-C "$${ZFS_BUILD_ROOT}"}			\
 	    $${ZFS_BRANCH:+-b "$${ZFS_BRANCH}"}				\
@@ -38,6 +39,7 @@ install-rpms:
 	@ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT);				\
 	ZFS_BRANCH=$(ZFS_BRANCH);					\
 	ZFS_TAG=$(ZFS_TAG);						\
+	set -o pipefail;                                                \
 	$(BUILD_DIR)zfs-rpms						\
 	    $${ZFS_BUILD_ROOT:+-C "$${ZFS_BUILD_ROOT}"}			\
 	    $${ZFS_BRANCH:+-b "$${ZFS_BRANCH}"}				\

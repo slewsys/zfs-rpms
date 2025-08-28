@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+#
+# SPDX-License-Identifier: MIT
+#
+# @(#) enroll-mok
+#
+# If Secure Boot is enabled, this script can generate a the Dynamic
+# Kernel Module Support (DKMS) Machine Owner Key (MOK) and initiate
+# enrollment of the MOK into the system's Secure Boot firmware. Before
+# proceeding, the user is prompted whether to continue. A system
+# reboot is required.
+#
+: ${CAT_CMD:='@CAT_CMD@'}
+: ${DKMS_CMD:='@DKMS_CMD@'}
+: ${GREP_CMD:='@GREP_CMD@'}
+: ${MOKUTIL_CMD:='@MOKUTIL_CMD@'}
+: ${RESTART_CMD:='@RESTART_CMD@'}
+: ${SYSTEMCTL_CMD:='@SYSTEMCTL_CMD@'}
+
+# Constants.
+: ${DKMS_PUB_MOK:='/var/lib/dkms/mok.pub'}
+
+usage ()
+{
+    $CAT_CMD >&2 <<EOF
+Usage: ${0##*/}
+If Secure Boot is enabled, this script can generate a the Dynamic
+Kernel Module Support (DKMS) Machine Owner Key (MOK) and initiate
+enrollment of the MOK into the system's Secure Boot firmware. Before
+proceeding, the user is prompted whether to continue. A system reboot
+is required.
+EOF
+}
+
+confirm ()
+{
+    local reply=''
+
+    while [[ ! ."$reply" =~ \.([Yy]|[Nn]) ]]; do
+        read -t 180 -N 1 -p "$@ [y|n]? " reply </dev/tty || return $?
+        echo >&2
+    done
+
+    case $reply in
+        [Yy]) return 0 ;;
+        [Nn]) return 1 ;;
+    esac
+}
+
+enroll-dkms-mok ()
+{
+    $CAT_CMD >&2 <<EOF
+Since this system has Secure Boot enabled, to install OpenZFS with
+Dynamic Kernel Module Support (DKMS), a Machine Owner Key (MOK)
+must be generated and entrusted to Secure Boot firmware by means of
+"enrollment". This requires a system reboot.
+EOF
+    if ! confirm 'Proceed with DKMS MOK enrollment'; then
+        $CAT_CMD >&2 <<EOF
+DKMS MOK enrollment cancelled by user. A DKMS MOK can be generated and
+enrolled manually as follows. As user root, run:
+
+    $DKMS_CMD generate_mok
+    $MOKUTIL_CMD --import /var/lib/dkms/mok.pub
+
+When prompted, create a one-time PIN to be entered upon reboot, then:
+
+    $SYSTEMCTL_CMD reboot
+
+On restart, when prompted, select "Enroll MOK", then "Continue" to
+enroll. Select "Yes" to confirm, and enter the PIN created above.
+EOF
+        return 1
+    elif test ! -f "$DKMS_PUB_MOK"; then
+        $DKMS_CMD generate_mok || return $?
+    fi
+
+    $MOKUTIL_CMD --import "$DKMS_PUB_MOK" || return $?
+
+    if confirm 'Reboot now'; then
+        if command -v $RESTART_CMD; then
+            $RESTART_CMD now || return $?
+        fi
+
+        $SYSTEMCTL_CMD reboot
+    fi
+}
+
+if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    if (( $# > 0 )); then
+        usage
+        exit 1
+    fi
+
+    case $($MOKUTIL_CMD --sb-state) in
+        *enabled)
+            if ! $MOKUTIL_CMD --list-enrolled |
+                    $GREP_CMD 'DKMS module' >/dev/null; then
+                enroll-dkms-mok || exit $?
+            else
+                echo "DKMS MOK already enrolled." >&2
+            fi
+            ;;
+        *)
+            echo "Secure Boot not enabled. DKMS MOK enrollment not required." >&2
+            ;;
+    esac
+fi

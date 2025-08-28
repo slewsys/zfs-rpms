@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# SPDX-License-Identifier: MIT
+#
+# @(#) install-dependencies
+#
+: ${DNF_CMD:='@DNF_CMD@'}
+: ${RPM_CMD:='@RPM_CMD@'}
+: ${UNAME_CMD:='@UNAME_CMD@'}
+
+install-zfs-build-prerequisites ()
+{
+    $RPM_CMD -e --nodeps zfs-fuse 2>/dev/null || true
+
+    $DNF_CMD install -y autoconf automake dkms                  \
+              elfutils-libelf-devel fmt gcc gh git              \
+              kernel-devel libaio-devel libattr-devel           \
+              libblkid-devel libcurl-devel libffi-devel         \
+              libtirpc-devel libtool libuuid-devel make         \
+              mokutil ncompress openssl-devel python3           \
+              python3-cffi python3-devel python3-packaging      \
+              python3-setuptools rpm-build systemd-devel        \
+              zlib-ng-devel
+}
+
+if test ."$0" = ."${BASH_SOURCE[0]}"; then
+    install-zfs-build-prerequisites
+fi

@@ -6,7 +6,7 @@
 #
 # SYNOPSIS
 #
-#     Usage: $script_name -a | -s | -c | -i [-C BUILD-ROOT] [OPTIONS]
+#     Usage: $script_name [-C BUILD-ROOT] [OPTIONS] -a | -s | -c | -i
 #     Available OPTIONS:
 #
 #         --all, -a      Pull/clone OpenZFS BRANCH, pivot to new BRANCH at TAG,
@@ -67,12 +67,18 @@
 #
 # NOTES
 #
-#     1. To save network bandwith, only a single branch of OpenZFS is
-#        cloned (using the GIT flags `--single-branch --filter=tree:0').
+#     1. To save network bandwith, ideally only a single branch of
+#        OpenZFS would fetched (using the GIT flags `--single-branch
+#        --filter=tree:0'). But to checkout a PR, its baseRefName
+#        branch must be available, and there doesn't seem to be a way
+#        to incrementally fetch branches in this manner. So for now, a
+#        full clone is required.
+#
 #     2. After installing the RPMs and loading the new ZFS kernel
 #        module, initramfs is rebuilt to update any previous ZFS
-#        module even though this is not currently used by Fedora.
+#        module even though this isn't used by Fedora.
 #
+: ${ARCH_CMD:='@ARCH_CMD@'}
 : ${AWK_CMD:='@AWK_CMD@'}
 : ${CAT_CMD:='@CAT_CMD@'}
 : ${DKMS_CMD:='@DKMS_CMD@'}
@@ -89,12 +95,13 @@
 : ${LS_CMD:='@LS_CMD@'}
 : ${LSINITRD_CMD:='@LSINITRD_CMD@'}
 : ${MAKE_CMD:='@MAKE_CMD@'}
+: ${MKTEMP_CMD:='@MKTEMP_CMD@'}
 : ${MODPROBE_CMD:='@MODPROBE_CMD@'}
 : ${MOKUTIL_CMD:='@MOKUTIL_CMD@'}
 : ${PYTHON_CMD:='@PYTHON_CMD@'}
 : ${REALPATH_CMD:='@REALPATH_CMD@'}
+: ${RM_CMD:='@RM_CMD@'}
 : ${RMDIR_CMD:='@RMDIR_CMD@'}
-: ${RPM_CMD:='@RPM_CMD@'}
 : ${SED_CMD:='@SED_CMD@'}
 : ${SLEEP_CMD:='@SLEEP_CMD@'}
 : ${SUDO_CMD:='@SUDO_CMD@'}
@@ -106,7 +113,7 @@
 # Numeric constants.
 : ${COLUMNS:=$($TPUT_CMD cols)}
 : ${PYTHON_CMD_VERSION:="$($PYTHON_CMD --version | $AWK_CMD '{ print $2 }')"}
-: ${SCRIPT_VERSION:='1.0.0'}
+: ${SCRIPT_VERSION:='0.0.1'}
 
 usage ()
 {
@@ -125,7 +132,7 @@ usage ()
     fi
 
     $CAT_CMD <<EOF
-Usage: $script_name -a | -s | -c | -i [-C BUILD-ROOT] [OPTIONS]
+Usage: $script_name [-C BUILD-ROOT] [OPTIONS] -a | -s | -c | -i
 Available OPTIONS:
 
     --all, -a      Pull/clone OpenZFS BRANCH, pivot to new BRANCH at TAG,
@@ -167,6 +174,7 @@ error ()
         $FMT_CMD -tw $(( COLUMNS - 5 )) >&2
 }
 
+
 confirm ()
 {
     local prompt=''
@@ -205,14 +213,14 @@ verify-command-paths ()
             export "$cmd"
         elif eval test .\"\$$cmd\" = .''; then
             (( ++missing ))
-            echo "${0##*/}: $cmd: Undefined variable" >&2
+            echo "${script_name}: $cmd: Undefined variable" >&2
 
         # Assume that number-prefixed values are version numbers.
         elif eval [[ .\"\$$cmd\" =~ ^\.[0-9] ]]; then
             export "$cmd"
         elif ! eval command -v \"\$$cmd\" >/dev/null; then
             (( ++missing ))
-            eval echo "${0##*/}: \$$cmd: Command missing." >&2
+            eval echo "${script_name}: \$$cmd: Command missing." >&2
         else
             export "$cmd"
         fi
@@ -221,13 +229,57 @@ verify-command-paths ()
     if (( missing > 0 )); then
         error <<EOF
 
-To install missing commands, run:
+To install missing commands, with root privileges run:
 
-  bash -c 'source $0; install-prerequisites'
+./install-dependencies
 
 EOF
         return 1
     fi
+}
+
+verify-zfs-build-prerequisites ()
+{
+    local tempfile=$($MKTEMP_CMD -p . "${script_name}.XXXXXXX")
+
+    trap '$RM_CMD -f "$tempfile"; exit 1' 0 1 2 15 RETURN
+
+    $DNF_CMD -C list --installed |
+        $AWK_CMD '{ print $1 }' |
+        $SED_CMD "s/\.$($ARCH_CMD)$//" > "$tempfile" || return $?
+
+    local -i missing=0
+    local -a prerequisite_packages=(
+        autoconf automake elfutils-libelf-devel '(llvm|gcc)'
+        kernel-devel libaio-devel libattr-devel libblkid-devel
+        libcurl-devel libffi-devel libtirpc-devel libtool
+        libuuid-devel ncompress openssl-devel python3
+        python3-cffi python3-devel python3-packaging
+        python3-setuptools rpm-build systemd-devel
+        '(zlib-devel|zlib-ng-devel)'
+    )
+
+    for pkg in "${prerequisite_packages[@]}"; do
+        if ! $GREP_CMD -Eq "^${pkg}" "$tempfile"; then
+            echo "${script_name}: ${pkg//+([()])/}: Prerequisite package missing." >&2
+            (( ++missing ))
+        fi
+    done
+
+    if (( missing > 0 )); then
+        error <<EOF
+
+To install missing packages, with root privileges run:
+
+./install-dependencies
+
+EOF
+        return 1
+    fi
+
+    $RM_CMD -f  "$tempfile"
+
+    trap - 0 1 2 15 RETURN
 }
 
 check-mok-enrollment ()
@@ -236,21 +288,14 @@ check-mok-enrollment ()
         *enabled)
             if ! $MOKUTIL_CMD --list-enrolled |
                     $GREP_CMD 'DKMS module' >/dev/null; then
+                $CAT_CMD >&2 <<EOF
 
-                if test ! -f /var/lib/dkms/mok.pub; then
-                    $SUDO_CMD $DKMS_CMD generate_mok || return $?
-                fi
+This system has Secure Boot enabled but is missing an enrolled
+Machine Owner Key (MOK) for Dynamic Kernel Module Support (DKMS).
+To enroll a DKMS MOK, with root privileges run:
 
-                $FMT_CMD -w $(( COLUMNS - 5 )) >&2 <<'EOF'
-To install ZFS with  Dynamic Kernel Module Support (DKMS), DKMS's Machine Owner Key (MOK) must first be entrusted to Secure Boot firmware. This is done by "enrolling" the MOK as follows. Run:
+./enroll-mok
 
-    sudo mokutil --import /var/lib/dkms/mok.pub
-
-and create a one-time password that will be used upon reboot:
-
-    sudo systemctl reboot
-
-When prompted by BIOS, select "Enroll MOK", then "Continue" to enroll. Select "Yes" to confirm; enter the password just created, then "Reboot".  Finally, run this script again.
 EOF
                 return 1
             fi
@@ -271,26 +316,14 @@ sanity-check-environment ()
         $($SED_CMD -Ene '/^: \$\{([A-Z_][A-Z0-9_]*):.*/s//\1/p' "$0")
     ) || return $?
     verify-command-paths command_variables || return $?
+    verify-zfs-build-prerequisites || return $?
     check-mok-enrollment || return $?
-}
-
-install-prerequisites ()
-{
-    $SUDO_CMD $RPM_CMD -e --nodeps zfs-fuse 2>/dev/null || true
-
-    $SUDO_CMD $DNF_CMD install -y autoconf automake dkms                        \
-              elfutils-libelf-devel fmt gcc gh git                              \
-              kernel-devel-$($UNAME_CMD -r) libaio-devel libattr-devel          \
-              libblkid-devel libcurl-devel libffi-devel libtirpc-devel          \
-              libtool libudev-devel libuuid-devel make mokutil                  \
-              ncompress openssl-devel python3 python3-cffi python3-devel        \
-              python3-packaging python3-setuptools rpm-build zlib-devel
 }
 
 requires-reboot ()
 {
     $SUDO_CMD $LSINITRD_CMD |
-        $GREP_CMD 'zfs\.ko' >/dev/null
+        $GREP_CMD -q 'zfs\.ko'
 }
 
 initialize-build-root ()
@@ -299,13 +332,13 @@ initialize-build-root ()
 
     _params[working-directory]=$($REALPATH_CMD -m "${2:-.}") || return $?
 
-    if [[ ."${_params[working-directory]}" =~                                           \
+    if [[ ."${_params[working-directory]}" =~ \
            ^\./($|afs|boot|dev|etc|media|mnt|proc|root|run|srv|sys|usr|var) ]]; then
         echo "$script_name: ${_params[working-directory]}: Permission denied" >&2
         return 1
     elif test ! -d "${_params[working-directory]}"; then
-        $SUDO_CMD $INSTALL_CMD -d -m 0755                                       \
-                  -o "$($ID_CMD -un)" -g "$($ID_CMD -gn)"                       \
+        $INSTALL_CMD -d -m 0755 \
+                  -o "$($ID_CMD -un)" -g "$($ID_CMD -gn)" \
                   "${_params[working-directory]}" || return $?
     fi
 }
@@ -357,7 +390,7 @@ initialize-tag ()
         _params[initial-tag]=HEAD
     elif test ."${_params[initial-tag]}" = .''; then
         _params[initial-tag]=$(
-            $GIT_CMD ls-remote  --tags  --sort='version:refname'                \
+            $GIT_CMD ls-remote  --tags  --sort='version:refname' \
                      "${_params[url]}" |
                 $GREP_CMD -Ev '(\.99|\^\{\})$' |
                 $AWK_CMD -F/ 'END { print $NF }'
@@ -413,7 +446,7 @@ get-rpm-filename ()
     fi
 
     _params[installed-filename]=$(
-        $SUDO_CMD $DNF_CMD list --installed 'zfs-dkms*noarch' 2>/dev/null |
+        $DNF_CMD -C list --installed 'zfs-dkms*noarch' 2>/dev/null |
             $AWK_CMD 'END { split($1, name, ".")
                             printf "%s-%s.%s.rpm", name[1], $2, name[2]
                       }'
@@ -427,8 +460,10 @@ sync-zfs-repo ()
     local tag=${params[current-tag]}
 
     if test ! -d "${params[repo-path]}/.git"; then
-        $GIT_CMD clone --single-branch --filter=tree:0                          \
-                 -b "${params[initial-branch]}" "${params[url]}"                \
+        # $GIT_CMD clone --single-branch --filter=tree:0 \
+        #          -b "${params[initial-branch]}" "${params[url]}" \
+        #          "${params[repo-path]}" || return $?
+        $GIT_CMD clone -b "${params[initial-branch]}" "${params[url]}" \
                  "${params[repo-path]}" || return $?
     else
         $GIT_CMD -C "${params[repo-path]}" pull --rebase || return $?
@@ -437,7 +472,8 @@ sync-zfs-repo ()
     fi
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    trap 'popd; exit 1' 0 1 2 15 RETURN
+    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
+    trap 'exit 1' 0 1 2 15 RETURN
 
     local new_branch=''
 
@@ -446,8 +482,8 @@ sync-zfs-repo ()
         if test ."${params[current-branch]}" = ."${params[initial-branch]}"; then
             new_branch=$(describe-branch params) || return $?
             $GIT_CMD switch --create "$new_branch" "$tag" || return $?
-            $GIT_CMD branch                                                     \
-                     --set-upstream-to="origin/${params[initial-branch]}"       \
+            $GIT_CMD branch \
+                     --set-upstream-to="origin/${params[initial-branch]}" \
                      "$new_branch" || return $?
         fi
     elif test ! -f "${params[repo-path]}/.git/refs/heads/${tag}"; then
@@ -459,8 +495,8 @@ sync-zfs-repo ()
             $GIT_CMD switch --create "$new_branch" || return $?
         fi
 
-        $GIT_CMD branch                                                         \
-                 --set-upstream-to="origin/${params[initial-branch]}"           \
+        $GIT_CMD branch                                                       \
+                 --set-upstream-to="origin/${params[initial-branch]}"         \
                  "$new_branch" || return $?
     fi
 
@@ -475,22 +511,53 @@ apply-pull-requests ()
     local -a prs=( $(IFS=','; set -- ${params[pull-request]}; echo "$@") )
     local -a pr_branches=()
     local -a pr_commits=()
-    local -i commit_count=0
-    local head_ref_name=''
+    local -a pr_titles=()
+    local -i i=0
     local pr=''
 
-    pushd "${params[repo-path]}" >/dev/null || return $?
-    trap 'popd; exit 1' 0 1 2 15 RETURN
 
-    # Each PR is checked out to headRefName branch.
-    for pr in "${prs[@]}"; do
-        $GH_CMD co "$pr" --force || return $?
-        pr_fields=$($GH_CMD pr view "$pr" --json 'commits,headRefName') || return $?
+    pushd "${params[repo-path]}" >/dev/null || return $?
+    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
+    trap 'exit 1' 0 1 2 15 RETURN
+
+    for i in "${!prs[@]}"; do
+        local -i commit_count=0
+        local head_ref_name=''
+        local pr_base_ref_name=''
+        local pr_fields=''
+        local pr_title=''
+
+        pr_base_ref_name=$($GH_CMD pr view "${prs[i]}" --json baseRefName -q '.baseRefName') || return $?
+        pr_title=$($GH_CMD pr view "${prs[i]}" --json title -q '.title') || return $?
+
+        if test ."$pr_base_ref_name" != ."${params[initial-branch]}"; then
+            echo "WARNING: BaseRefName mismatch: ${pr_base_ref_name} vs ${params[initial-branch]}" >&2
+            echo "WARNING: Pull request ${prs[i]} might conflict with current branch." >&2
+
+            if ! confirm "Apply pull request ${prs[i]} ($pr_title)"; then
+                unset prs[i]
+                continue
+            fi
+
+            $GIT_CMD switch "$pr_base_ref_name" || return $?
+        fi
+
+        $GH_CMD pr checkout "${prs[i]}" --force || return $?
+        pr_fields=$($GH_CMD pr view "${prs[i]}" --json 'commits,headRefName') || return $?
         commit_count=$($JQ_CMD '.commits|length' <<<"$pr_fields") || return $?
         head_ref_name=$($JQ_CMD -r .headRefName <<<"$pr_fields") || return $?
         pr_branches+=( "$head_ref_name" )
         pr_commits+=( "$commit_count" )
+        pr_titles+=( "$pr_title" )
     done
+
+    if (( ${#prs[*]} == 0 )); then
+
+        # Nothing to do.
+        popd >/dev/null
+        trap - 0 1 2 15 RETURN
+        return
+    fi
 
     # Create branch to merge PRs.
     local merged_branch=$(IFS=+; echo "${prs[*]}")
@@ -508,21 +575,28 @@ apply-pull-requests ()
 
     $GIT_CMD switch "${params[current-branch]}" || return $?
     $GIT_CMD switch --create  "$merged_branch" || return $?
-    $GIT_CMD branch --set-upstream-to="origin/${params[initial-branch]}"        \
+    $GIT_CMD branch --set-upstream-to="origin/${params[initial-branch]}"      \
              "$merged_branch" || return $?
 
-    local -i i=0
-
-    echo "*** Enter git credentials to enable cherry-picking..." >&2
+    echo "*** Enter git credentials below to enable cherry-picking..." >&2
 
     for i in "${!pr_commits[@]}"; do
-        echo "*** Applying pull request ${prs[i]} to branch ${merged_branch}..." >&2
-        $GIT_CMD cherry-pick -X ort --strategy-option=ours \
-                 "${pr_branches[i]}~${pr_commits[i]}".."${pr_branches[i]}" || return $?
+        echo "*** Pull Request #${prs[i]} ($pr_titles[i]) ***" >&2
+        echo "*** Applying ${pr_commits[i]} commit(s) to branch ${merged_branch}..." >&2
+        if ! $GIT_CMD cherry-pick -X ort --strategy-option=ours \
+             "${pr_branches[i]}~${pr_commits[i]}".."${pr_branches[i]}"; then
+            $CAT_CMD >&2 <<EOF
+*** ${script_name}: Resolve conflicts in:
+***     ${params[repo-path]},
+*** then run \`make rpms' again.
+EOF
+            return 1
+        fi
     done
 
     local pr_tag_msg=''
     local pr_tag=''
+    local pr_tagged_commit=''
 
     # If PR commit message of the form: `Tag X.Y.Z-rcN' exists, then
     # create a tag for it (these commits already update META).
@@ -552,18 +626,21 @@ apply-pull-requests ()
 
     popd >/dev/null
     trap - 0 1 2 15 RETURN
+exit
 }
+
 
 build-zfs-rpms ()
 {
     local -n params=$1
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    trap 'popd; exit 1' 0 1 2 15 RETURN
+    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
+    trap 'exit 1' 0 1 2 15 RETURN
 
     $GIT_CMD clean -fdx || return $?
     ./autogen.sh || return $?
-    ./configure PYTHON="$PYTHON_CMD" PYTHON_VERSION="$PYTHON_CMD_VERSION"       \
+    ./configure PYTHON="$PYTHON_CMD" PYTHON_VERSION="$PYTHON_CMD_VERSION" \
         || return $?
     $MAKE_CMD -j1 rpm-utils rpm-dkms || return $?
     get-rpm-filename params || return $?
@@ -577,10 +654,11 @@ install-zfs-rpms ()
     local -n params=$1
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    trap 'popd; exit 1' 0 1 2 15 RETURN
+    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
+    trap 'exit 1' 0 1 2 15 RETURN
 
     if command -v $ZPOOL_CMD >/dev/null; then
-        $SUDO_CMD $ZPOOL_CMD export -a || return $?
+        $ZPOOL_CMD export -a || return $?
     fi
 
     local install_prefix=''
@@ -591,23 +669,23 @@ install-zfs-rpms ()
 
     local rebuild_initramfs=false
 
-    case $($SUDO_CMD $MODPROBE_CMD -r zfs 2>&1) in
+    case $($MODPROBE_CMD -r zfs 2>&1) in
         *'in use'*)
 
             # Can't remove ZFS kernel module => ZFS in initramfs.
             rebuild_initramfs=true
 
-            $SUDO_CMD $DNF_CMD remove -y --no-autoremove 'libnvpair*'           \
-                      'libuutil*' 'libzfs*' 'libzpool*' zfs-dkms                \
+            $DNF_CMD remove -y --no-autoremove 'libnvpair*' \
+                      'libuutil*' 'libzfs*' 'libzpool*' zfs-dkms \
                       'zfs-debuginfo*'  'zfs-test*'
 
-            $SUDO_CMD $DNF_CMD install -y $(
+            $DNF_CMD install -y $(
                 $LS_CMD ./*$($UNAME_CMD -m).rpm ./*noarch.rpm |
                     $GREP_CMD -Ev 'debug|src'
                       ) || return $?
             ;;
         *)
-            $SUDO_CMD $DNF_CMD "${install_prefix}install" -y $(
+            $DNF_CMD "${install_prefix}install" -y $(
                 $LS_CMD ./*$($UNAME_CMD -m).rpm ./*noarch.rpm |
                     $GREP_CMD -Ev 'debug|src'
                       ) || return $?
@@ -621,17 +699,17 @@ install-zfs-rpms ()
         trap '' 2 15
 
         echo "Rebuilding initramfs, please wait..." >&2
-        $SUDO_CMD $DRACUT_CMD --force || return $?
+        $DRACUT_CMD --force || return $?
 
         trap - 2 15
 
         if confirm "Ready to restart system"; then
             $SLEEP_CMD 10
-            $SUDO_CMD $SYSTEMCTL_CMD reboot
+            $SYSTEMCTL_CMD reboot
         fi
     else
-        $SUDO_CMD $MODPROBE_CMD zfs 2>/dev/null || return $?
-        $SUDO_CMD $ZPOOL_CMD import || return $?
+        $MODPROBE_CMD zfs 2>/dev/null || return $?
+        $ZPOOL_CMD import || return $?
     fi
 }
 
@@ -663,23 +741,23 @@ confirm-request ()
         msg[sync+install]="Apply pull request(s) to ${params[current-tag]} of branch ${params[current-branch]}, and install (without building) RPMs"
     fi
 
-    if ${params[compile]} || ${params[all]}                                     \
-                && test -f "${params[repo-path]}/${params[rpm-filename]}"       \
-                && test ."${params[pull-request]}" = .''                        \
+    if ${params[compile]} || ${params[all]}                                   \
+                && test -f "${params[repo-path]}/${params[rpm-filename]}"     \
+                && test ."${params[pull-request]}" = .''                      \
                 && ! ${params[force]}; then
         error "${err_msg[exists]}"
         return 1
-    elif ${params[compile]} && ! ${params[sync]}                                \
-            && test ."${params[pull-request]}" = .''                            \
+    elif ${params[compile]} && ! ${params[sync]}                              \
+            && test ."${params[pull-request]}" = .''                          \
             && test ! -d "${params[repo-path]}/.git"; then
         error "${err_msg[not-synced]}"
         return 2
-    elif ${params[install]} || ${params[all]}                                           \
-                && test ."${params[rpm-filename]}" = ."${params[installed-filename]}"   \
+    elif ${params[install]} || ${params[all]} \
+                && test ."${params[rpm-filename]}" = ."${params[installed-filename]}" \
                 && ! ${params[force]}; then
         error "${err_msg[installed]}"
         return 3
-    elif ${params[install]} && ! ${params[compile]}                                     \
+    elif ${params[install]} && ! ${params[compile]} \
                 && test ! -f "${params[repo-path]}/${params[rpm-filename]}"; then
         error "${err_msg[none]}"
         return 4
@@ -721,7 +799,7 @@ parse-command-line ()
 
     shift
     if ! args=$(
-            $GETOPT_CMD --shell bash --options "$shortopts"                     \
+            $GETOPT_CMD --shell bash --options "$shortopts" \
                         --longoptions "$longopts" --name "$script_name" -- "$@"
          ); then
         usage params
@@ -795,7 +873,7 @@ parse-command-line ()
 
     if ${params[sync]} && ${params[compile]} && ${params[install]}; then
         params[all]=true
-    elif ! { ${params[sync]} || ${params[compile]}                              \
+    elif ! { ${params[sync]} || ${params[compile]} \
                || ${params[install]} || ${params[all]}; }; then
         usage params
         return 1
@@ -804,17 +882,6 @@ parse-command-line ()
 
 main ()
 {
-    set -o pipefail
-    shopt -u nullglob
-
-    local script=''
-    local script_name=''
-    local script_version=''
-
-    script=$($REALPATH_CMD -e "$0") || return $?
-    script_name=${script##*/}
-    script_version="${script_name} v${SCRIPT_VERSION}"
-
     local -A parameters=(
         [all]=false
         [initial-branch]=''
@@ -847,11 +914,11 @@ main ()
         initialize-tag parameters || return $?
     fi
 
-    if ! get-rpm-filename parameters                                            \
+    if ! get-rpm-filename parameters \
             || ! confirm-request parameters; then
         local status=$?
 
-        $RMDIR_CMD --ignore-fail-on-non-empty                                   \
+        $RMDIR_CMD --ignore-fail-on-non-empty \
                    "${parameters[working-directory]}" || true
         return $status
     fi
@@ -865,7 +932,6 @@ main ()
     fi
 
     if ${parameters[compile]} || ${parameters[all]}; then
-        install-prerequisites || return $?
         build-zfs-rpms parameters || return $?
         echo "${parameters[repo-path]}:" >&2
         $LS_CMD "${parameters[repo-path]}"/*.rpm |
@@ -878,5 +944,17 @@ main ()
 }
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
-    sanity-check-environment && main "$@"
+    set -o pipefail
+    shopt -u nullglob
+    shopt -s extglob
+
+    declare script=''
+    declare script_name=''
+    declare script_version=''
+
+    script=$($REALPATH_CMD -e "$0") || return $?
+    script_name=${script##*/}
+    script_version="${script_name} v${SCRIPT_VERSION}"
+
+    sanity-check-environment && main "$@" || exit $?
 fi
