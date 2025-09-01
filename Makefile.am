@@ -32,10 +32,6 @@ rpms: zfs-rpms
 	    sed -e 's/--force/FORCE=/'
 
 install-rpms:
-	@if (( UID == 0 )); then					\
-	    echo "Do not run as user root.";				\
-	    exit 1;							\
-	fi
 	@ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT);				\
 	ZFS_BRANCH=$(ZFS_BRANCH);					\
 	ZFS_TAG=$(ZFS_TAG);						\
