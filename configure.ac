@@ -34,55 +34,55 @@ AC_SUBST([OPT_PATHS], ["$OPT_PATHS"])
 OPT_PREFIX=${OPT_PREFIX:+"${OPT_PREFIX}${PATH_SEPARATOR}"}
 
 # Checks for programs.
-AC_PATH_PROG([ARCH_CMD],        [arch],           [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([ARCH_CMD],        [arch],               [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([AWK_CMD],        [gawk awk],           [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([CAT_CMD],        [gcat cat],           [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([DKMS_CMD],        [dkms],           [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([DNF_CMD],         [dnf],            [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([DRACUT_CMD],      [dracut],         [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([DKMS_CMD],        [dkms],               [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([DNF_CMD],         [dnf],                [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([DRACUT_CMD],      [dracut],             [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([FIND_CMD],       [gfind find],         [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([FMT_CMD],        [gfmt fmt],           [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([GETOPT_CMD],      [getopt],         [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([GH_CMD],          [gh],             [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([GIT_CMD],         [git],            [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([GETOPT_CMD],      [getopt],             [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([GH_CMD],          [gh],                 [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([GIT_CMD],         [git],                [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([GREP_CMD],       [ggrep grep],         [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([ID_CMD],          [id],             [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([INSTALL_CMD],     [install],        [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([JQ_CMD],          [jq],             [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([ID_CMD],          [id],                 [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([INSTALL_CMD],     [install],            [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([JQ_CMD],          [jq],                 [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([LS_CMD],         [gls ls],             [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([LSINITRD_CMD],    [lsinitrd],       [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([LSINITRD_CMD],    [lsinitrd],           [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([MAKE_CMD],       [gmake make],         [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([MKTEMP_CMD],     [gmktemp mktemp],     [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([MODPROBE_CMD],    [modprobe],       [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([MOKUTIL_CMD],     [mokutil],        [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([PYTHON_CMD],      [python],         [], [], [${USR_PREFIX}${PATH}])
+AC_PATH_PROG([MODPROBE_CMD],    [modprobe],           [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([MOKUTIL_CMD],     [mokutil],            [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([PYTHON_CMD],      [python],             [], [${USR_PREFIX}${PATH}])
 
 AC_PATH_PROGS([REALPATH_CMD],   [grealpath realpath], [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([RESTART_CMD],     [restart],         [], [], [${HOME_PREFIX}${PATH}])
+AC_PATH_PROG([RESTART_CMD],     [restart],            [], [${HOME_PREFIX}${PATH}])
 
 AC_PATH_PROGS([RM_CMD],         [grm rm],             [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([RMDIR_CMD],      [grmdir rmdir],       [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([RPM_CMD],         [rpm],            [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([RPM_CMD],         [rpm],                [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([SED_CMD],        [gsed sed]            [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([SLEEP_CMD],      [gsleep sleep],       [], [${OPT_PREFIX}${PATH}])
 
-AC_PATH_PROG([SUDO_CMD],        [sudo],           [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([SYSTEMCTL_CMD],   [systemctl],      [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROG([TPUT_CMD],        [tput],           [], [], [${OPT_PREFIX}${PATH}])
-AC_PATH_PROGS([UNAME_CMD],      [uname],          [], [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([SUDO_CMD],        [sudo],               [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([SYSTEMCTL_CMD],   [systemctl],          [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROG([TPUT_CMD],        [tput],               [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROGS([UNAME_CMD],      [uname],              [], [${OPT_PREFIX}${PATH}])
 
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([enroll-mok],                         [chmod +x enroll-mok])
