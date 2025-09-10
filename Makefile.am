@@ -12,7 +12,9 @@ AM_DEFAULT_SOURCE_EXT = .in
 .PHONY: all rpms clean-local
 
 
-all: zfs-rpms.in
+all: rpms
+
+help:
 	@echo "Usage: make rpms [PRS=xxx,...] [ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT)]"
 	@echo "       make install-rpms [ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT)]"
 
@@ -28,10 +30,9 @@ rpms: zfs-rpms
 	    $${PRS:+-p "$${PRS}"}					\
 	    $${FORCE+-f}						\
 	    $${VERBOSE+-v}						\
-	    -sc >&2 2>&1 |						\
-	    sed -e 's/--force/FORCE=/'
+	    -sc
 
-install-rpms:
+install-exec-local:
 	@ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT);				\
 	ZFS_BRANCH=$(ZFS_BRANCH);					\
 	ZFS_TAG=$(ZFS_TAG);						\
@@ -42,8 +43,7 @@ install-rpms:
 	    $${ZFS_TAG:+-t "$${ZFS_TAG}"}				\
 	    $${FORCE+-f}						\
 	    $${VERBOSE+-v}						\
-	    -i >&2 2>&1 |						\
-	    sed -e 's/--force/FORCE=/'
+	    -i
 
 zfs-rpms: zfs-rpms.in
 

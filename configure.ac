@@ -58,6 +58,7 @@ AC_PATH_PROG([JQ_CMD],          [jq],                 [], [${OPT_PREFIX}${PATH}]
 
 AC_PATH_PROGS([LS_CMD],         [gls ls],             [], [${OPT_PREFIX}${PATH}])
 
+AC_PATH_PROG([LSMOD_CMD],       [lsmod],              [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([LSINITRD_CMD],    [lsinitrd],           [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROGS([MAKE_CMD],       [gmake make],         [], [${OPT_PREFIX}${PATH}])
@@ -78,9 +79,13 @@ AC_PATH_PROG([RPM_CMD],         [rpm],                [], [${OPT_PREFIX}${PATH}]
 
 AC_PATH_PROGS([SED_CMD],        [gsed sed]            [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([SLEEP_CMD],      [gsleep sleep],       [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROGS([SORT_CMD],       [gsort sort],         [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROG([SUDO_CMD],        [sudo],               [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([SYSTEMCTL_CMD],   [systemctl],          [], [${OPT_PREFIX}${PATH}])
+
+AC_PATH_PROGS([TAIL_CMD],       [gtail tail],         [], [${OPT_PREFIX}${PATH}])
+
 AC_PATH_PROG([TPUT_CMD],        [tput],               [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([UNAME_CMD],      [uname],              [], [${OPT_PREFIX}${PATH}])
 

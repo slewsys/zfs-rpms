@@ -93,6 +93,7 @@
 : ${ID_CMD:='@ID_CMD@'}
 : ${JQ_CMD:='@JQ_CMD@'}
 : ${LS_CMD:='@LS_CMD@'}
+: ${LSMOD_CMD:='@LSMOD_CMD@'}
 : ${LSINITRD_CMD:='@LSINITRD_CMD@'}
 : ${MAKE_CMD:='@MAKE_CMD@'}
 : ${MKTEMP_CMD:='@MKTEMP_CMD@'}
@@ -104,8 +105,10 @@
 : ${RMDIR_CMD:='@RMDIR_CMD@'}
 : ${SED_CMD:='@SED_CMD@'}
 : ${SLEEP_CMD:='@SLEEP_CMD@'}
+: ${SORT_CMD:='@SORT_CMD@'}
 : ${SUDO_CMD:='@SUDO_CMD@'}
 : ${SYSTEMCTL_CMD:='@SYSTEMCTL_CMD@'}
+: ${TAIL_CMD:='@TAIL_CMD@'}
 : ${TPUT_CMD:='@TPUT_CMD@'}
 : ${UNAME_CMD:='@UNAME_CMD@'}
 : ${ZPOOL_CMD:='/usr/sbin/zpool'}
@@ -667,13 +670,17 @@ install-zfs-rpms ()
         install_prefix=re
     fi
 
-    local rebuild_initramfs=false
+    local rmmod_zfs=''
 
-    case $($MODPROBE_CMD -r zfs 2>&1) in
+    if $LSMOD_CMD | $GREP_CMD -q '^zfs\>'; then
+        rmmod_zfs=$($MODPROBE_CMD -r zfs 2>&1)
+    fi
+
+    case "$rmmod_zfs" in
         *'in use'*)
 
-            # Can't remove ZFS kernel module => ZFS in initramfs.
-            rebuild_initramfs=true
+            # ZFS might be in initramfs...
+            params[rebuild-initramfs]=true
 
             $DNF_CMD remove -y --no-autoremove 'libnvpair*' \
                       'libuutil*' 'libzfs*' 'libzpool*' zfs-dkms \
@@ -695,11 +702,44 @@ install-zfs-rpms ()
     popd >/dev/null
     trap - 0 1 2 15 RETURN
 
-    if $rebuild_initramfs; then
+    echo $rebuild_initramfs
+}
+
+install-modules-for-new-kernel ()
+{
+    local -n _params=$1
+
+    local module_version=''
+
+    module_version=$(
+        $GIT_CMD -C "${_params[repo-path]}" describe --tags |
+            $SED_CMD -Ee 's;zfs-([0-9]+\.[0-9]+\.[0-9]+).*;zfs/\1;'
+                  ) || return $?
+
+    echo "Installing module ${module_version} for kernel ${_params[new-kernel-release]}..." >&2
+    $SUDO_CMD $DKMS_CMD install -k ${_params[new-kernel-release]} "$module_version" || return $?
+}
+
+update-kernel-modules ()
+{
+    local -n params=$1
+
+    local new_release=''
+
+    if test ."${params[kernel-release]}" != ."${params[new-kernel-release]}"; then
+        install-modules-for-new-kernel params || return $?
+        new_release=${params[new-kernel-release]}
+    fi
+
+    if ${params[rebuild-initramfs]}; then
         trap '' 2 15
 
         echo "Rebuilding initramfs, please wait..." >&2
         $DRACUT_CMD --force || return $?
+
+        if test ."$new_release" != .''; then
+            $DRACUT_CMD --force --kver "$new_release" || return $?
+        fi
 
         trap - 2 15
 
@@ -709,8 +749,9 @@ install-zfs-rpms ()
         fi
     else
         $MODPROBE_CMD zfs 2>/dev/null || return $?
-        $ZPOOL_CMD import || return $?
+        $ZPOOL_CMD import -a || return $?
     fi
+
 }
 
 confirm-request ()
@@ -733,6 +774,12 @@ confirm-request ()
         [installed]="${script_name}: ${params[current-tag]} RPMs already installed; Use --force to override."
         [none]="${script_name}: No RPMs to install; Use option --compile to build first."
     )
+
+    # If arguments provided by `make' (i.e.: FORCE=1).
+    if test -f "/proc/${PPID}/comm" -a ."$(< "/proc/${PPID}/comm")" = .'make'; then
+            err_msg[exists]="${script_name}: ${params[current-tag]} RPMs already exist; Use FORCE= to override."
+            err_msg[installed]="${script_name}: ${params[current-tag]} RPMs already installed; Use FORCE= to override."
+    fi
 
     if test ."${params[pull-request]}" != .''; then
         msg[all]="Apply pull request(s) to ${params[current-tag]} of branch ${params[current-branch]}, and then build and install RPMs"
@@ -878,6 +925,12 @@ parse-command-line ()
         usage params
         return 1
     fi
+
+    params[new-kernel-release]=$(
+        $LS_CMD /lib/modules/ |
+            $SORT_CMD -V |
+            $TAIL_CMD -1
+        ) || return $?
 }
 
 main ()
@@ -891,7 +944,10 @@ main ()
         [force]=false
         [install]=false
         [installed-filename]=''
+        [kernel-release]=$($UNAME_CMD -r)
+        [new-kernel-release]=''
         [pull-request]=''
+        [rebuild-initramfs]=false
         [repo-path]=''
         [rpm-filename]=''
         [sync]=false
@@ -940,6 +996,7 @@ main ()
 
     if ${parameters[install]} || ${parameters[all]}; then
         install-zfs-rpms parameters || return $?
+        update-kernel-modules parameters || return $?
     fi
 }
 
@@ -956,5 +1013,6 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     script_name=${script##*/}
     script_version="${script_name} v${SCRIPT_VERSION}"
 
-    sanity-check-environment && main "$@" || exit $?
+    sanity-check-environment || exit $?
+    main "$@" || exit $?
 fi
