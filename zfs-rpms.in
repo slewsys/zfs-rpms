@@ -716,7 +716,12 @@ install-modules-for-new-kernel ()
             $SED_CMD -Ee 's;zfs-([0-9]+\.[0-9]+\.[0-9]+).*;zfs/\1;'
                   ) || return $?
 
-    echo "Installing module ${module_version} for kernel ${_params[new-kernel-release]}..." >&2
+    local ansi_green=$($TPUT_CMD setaf 2)
+    local ansi_reset='\e[0m'
+
+    printf "${ansi_green}Installing:\n" >&2
+    printf " ${module_version} for kernel ${_params[new-kernel-release]}...${ansi_reset}\n\n" >&2
+
     $SUDO_CMD $DKMS_CMD install -k ${_params[new-kernel-release]} "$module_version" || return $?
 }
 
