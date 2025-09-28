@@ -121,8 +121,8 @@ $script_name:
      run:
 
              \$ \$top_srcdir/configure [ZFS_BRANCH=master] [ZFS_TAG=HEAD]
-             \$ make rpms [PRS=xxx,...] [ZFS_BUILD_ROOT=${PWD}]
-             \$ make install-rpms [ZFS_BUILD_ROOT=${PWD}]
+             \$ make [PRS=xxx,...] [ZFS_BUILD_ROOT=${PWD}]
+             \$ sudo make install [ZFS_BUILD_ROOT=${PWD}]
 
 ------------------------------------------------------------------------
 EOF

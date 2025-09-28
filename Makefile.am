@@ -15,8 +15,8 @@ AM_DEFAULT_SOURCE_EXT = .in
 all: rpms
 
 help:
-	@echo "Usage: make rpms [PRS=xxx,...] [ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT)]"
-	@echo "       make install-rpms [ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT)]"
+	@echo "Usage: make [PRS=xxx,...] [ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT)]"
+	@echo "       make install [ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT)]"
 
 rpms: zfs-rpms
 	@ZFS_BUILD_ROOT=$(ZFS_BUILD_ROOT);				\
