@@ -81,6 +81,7 @@
 : ${ARCH_CMD:='@ARCH_CMD@'}
 : ${AWK_CMD:='@AWK_CMD@'}
 : ${CAT_CMD:='@CAT_CMD@'}
+: ${CP_CMD:='@CP_CMD@'}
 : ${DKMS_CMD:='@DKMS_CMD@'}
 : ${DNF_CMD:='@DNF_CMD@'}
 : ${DRACUT_CMD:='@DRACUT_CMD@'}
@@ -99,6 +100,7 @@
 : ${MKTEMP_CMD:='@MKTEMP_CMD@'}
 : ${MODPROBE_CMD:='@MODPROBE_CMD@'}
 : ${MOKUTIL_CMD:='@MOKUTIL_CMD@'}
+: ${MV_CMD:='@MV_CMD@'}
 : ${PYTHON_CMD:='@PYTHON_CMD@'}
 : ${REALPATH_CMD:='@REALPATH_CMD@'}
 : ${RM_CMD:='@RM_CMD@'}
@@ -475,8 +477,6 @@ sync-zfs-repo ()
     fi
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
-    trap 'exit 1' 0 1 2 15 RETURN
 
     local new_branch=''
 
@@ -504,7 +504,6 @@ sync-zfs-repo ()
     fi
 
     popd >/dev/null
-    trap - 0 1 2 15 RETURN
 }
 
 apply-pull-requests ()
@@ -520,8 +519,6 @@ apply-pull-requests ()
 
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
-    trap 'exit 1' 0 1 2 15 RETURN
 
     for i in "${!prs[@]}"; do
         local -i commit_count=0
@@ -558,8 +555,7 @@ apply-pull-requests ()
 
         # Nothing to do.
         popd >/dev/null
-        trap - 0 1 2 15 RETURN
-        return
+        return 0
     fi
 
     # Create branch to merge PRs.
@@ -628,7 +624,6 @@ EOF
     params[current-tag]=$tag
 
     popd >/dev/null
-    trap - 0 1 2 15 RETURN
 exit
 }
 
@@ -638,8 +633,6 @@ build-zfs-rpms ()
     local -n params=$1
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
-    trap 'exit 1' 0 1 2 15 RETURN
 
     $GIT_CMD clean -fdx || return $?
     ./autogen.sh || return $?
@@ -649,7 +642,6 @@ build-zfs-rpms ()
     get-rpm-filename params || return $?
 
     popd >/dev/null
-    trap - 0 1 2 15 RETURN
 }
 
 install-zfs-rpms ()
@@ -657,8 +649,6 @@ install-zfs-rpms ()
     local -n params=$1
 
     pushd "${params[repo-path]}" >/dev/null || return $?
-    # trap 'popd >/dev/null; exit 1' 0 1 2 15 RETURN
-    trap 'exit 1' 0 1 2 15 RETURN
 
     if command -v $ZPOOL_CMD >/dev/null; then
         $ZPOOL_CMD export -a || return $?
@@ -700,9 +690,8 @@ install-zfs-rpms ()
     esac
 
     popd >/dev/null
-    trap - 0 1 2 15 RETURN
 
-    echo $rebuild_initramfs
+    echo "$rebuild_initramfs"
 }
 
 install-modules-for-new-kernel ()
@@ -938,6 +927,25 @@ parse-command-line ()
         ) || return $?
 }
 
+set-python-env ()
+{
+    # Use system's Python.
+    $RM_CMD -f "${HOME}/.tool-versions.${script_name}"
+
+    if test -f "${HOME}/.tool-versions" \
+            && $GREP_CMD -q python "${HOME}/.tool-versions"; then
+        $CP_CMD -a "${HOME}/.tool-versions"{,."$script_name"} || return $?
+        $SED_CMD -i -e 's/^python.*/python system/' "${HOME}/.tool-versions" || return $?
+    fi
+}
+
+restore-python-env ()
+{
+    if test -f "${HOME}/.tool-versions.${script_name}"; then
+        $MV_CMD "${HOME}/.tool-versions"{."${script_name}",} || return $?
+    fi
+}
+
 main ()
 {
     local -A parameters=(
@@ -992,6 +1000,10 @@ main ()
         fi
     fi
 
+    set-python-env || return $?
+
+    trap 'restore-python-env' 0 1 2 15 RETURN
+
     if ${parameters[compile]} || ${parameters[all]}; then
         build-zfs-rpms parameters || return $?
         echo "${parameters[repo-path]}:" >&2
@@ -1003,6 +1015,10 @@ main ()
         install-zfs-rpms parameters || return $?
         update-kernel-modules parameters || return $?
     fi
+
+    restore-python-env || return $?
+
+    trap - 0 1 2 15 RETURN
 }
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then

@@ -38,6 +38,7 @@ AC_PATH_PROG([ARCH_CMD],        [arch],               [], [${OPT_PREFIX}${PATH}]
 
 AC_PATH_PROGS([AWK_CMD],        [gawk awk],           [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROGS([CAT_CMD],        [gcat cat],           [], [${OPT_PREFIX}${PATH}])
+AC_PATH_PROGS([CP_CMD],         [gcp cp],             [], [${OPT_PREFIX}${PATH}])
 
 AC_PATH_PROG([DKMS_CMD],        [dkms],               [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([DNF_CMD],         [dnf],                [], [${OPT_PREFIX}${PATH}])
@@ -66,6 +67,9 @@ AC_PATH_PROGS([MKTEMP_CMD],     [gmktemp mktemp],     [], [${OPT_PREFIX}${PATH}]
 
 AC_PATH_PROG([MODPROBE_CMD],    [modprobe],           [], [${OPT_PREFIX}${PATH}])
 AC_PATH_PROG([MOKUTIL_CMD],     [mokutil],            [], [${OPT_PREFIX}${PATH}])
+
+AC_PATH_PROGS([MV_CMD],         [gmv mv],             [], [${OPT_PREFIX}${PATH}])
+
 AC_PATH_PROG([PYTHON_CMD],      [python],             [], [${USR_PREFIX}${PATH}])
 
 AC_PATH_PROGS([REALPATH_CMD],   [grealpath realpath], [], [${OPT_PREFIX}${PATH}])
