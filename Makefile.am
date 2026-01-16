@@ -6,6 +6,7 @@ BUILD_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 ZFS_BUILD_ROOT ?= $(BUILD_DIR)
 
 bin_SCRIPTS = zfs-rpms
+EXTRA_DIST = enroll-mok.in install-dependencies.in
 
 AM_DEFAULT_SOURCE_EXT = .in
 
@@ -48,4 +49,4 @@ install-exec-local:
 zfs-rpms: zfs-rpms.in
 
 clean-local:
-	$(RM_CMD) -rf $(bin_SCRIPTS)
+	$(RM_CMD) -rf master
