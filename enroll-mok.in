@@ -90,6 +90,8 @@ if test ."$0" = ."${BASH_SOURCE[0]}"; then
     if (( $# > 0 )); then
         usage
         exit 1
+    elif (( UID != 0 )); then
+        echo "This command must be run by user root." >&2
     fi
 
     case $($MOKUTIL_CMD --sb-state) in

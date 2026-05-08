@@ -5,6 +5,7 @@
 # @(#) install-dependencies
 #
 : ${DNF_CMD:='@DNF_CMD@'}
+: ${GIT_CMD:='@GIT_CMD@'}
 : ${RPM_CMD:='@RPM_CMD@'}
 : ${UNAME_CMD:='@UNAME_CMD@'}
 
@@ -25,4 +26,12 @@ install-zfs-build-prerequisites ()
 
 if test ."$0" = ."${BASH_SOURCE[0]}"; then
     install-zfs-build-prerequisites
+
+    declare toplevel_dir=''
+
+    if ! toplevel_dir=$($GIT_CMD rev-parse --show-toplevel); then
+        echo "Please run configure again before proceeding." >&2
+    fi
+
+    ${toplevel_dir}/configure
 fi
