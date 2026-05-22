@@ -471,6 +471,24 @@ sync-zfs-repo ()
         $GIT_CMD clone -b "${params[initial-branch]}" "${params[url]}" \
                  "${params[repo-path]}" || return $?
     else
+        local -a uncommited=()
+        local uncommited_string=''
+
+        uncommited_string=$(
+            $GIT_CMD -C "${params[repo-path]}" status -s |
+                $GREP_CMD -E '^ *M'
+                  ) || return $?
+        mapfile -t uncommited <<<"$uncommited_string"
+        if (( ${#uncommited[*]} )); then
+            printf "Uncommited changes:\n" >&2
+            printf "%s\n" "${uncommited[@]}" >&2
+            if confirm "Run \`get reset --hard HEAD'"; then
+                $GIT_CMD -C "${params[repo-path]}" reset --hard HEAD || return $?
+            else
+                echo "Changes must be commited before rebasing."  >&2
+                return 1
+            fi
+        fi
         $GIT_CMD -C "${params[repo-path]}" pull --rebase || return $?
         initialize-tag params || return $?
         tag=${params[current-tag]}
