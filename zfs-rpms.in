@@ -381,7 +381,7 @@ describe-branch ()
     local -n __params=$1
 
     $GIT_CMD -C "${__params[repo-path]}" describe --tags |
-        $SED_CMD -e 's/-/_/3g'
+        $SED_CMD -e 's/-/./3g'
 }
 
 initialize-tag ()
