@@ -370,7 +370,7 @@ initialize-branch ()
     if test -d "${_params[repo-path]}/.git"; then
         _params[current-branch]=$(
             $GIT_CMD -C "${_params[repo-path]}" branch --show-current
-              )
+               )
     else
         _params[current-branch]=${_params[initial-branch]}
     fi
@@ -380,8 +380,14 @@ describe-branch ()
 {
     local -n __params=$1
 
+    local meta_version=''
+
+    meta_version=$(
+        $SED_CMD -ne '/^Meta/s;Meta:[[:space:]]\{1,\};;p' "${__params[repo-path]}/META"
+                ) || return $?
     $GIT_CMD -C "${__params[repo-path]}" describe --tags |
-        $SED_CMD -e 's/-/./3g'
+        $SED_CMD -e 's/-/./3g' \
+                 -e "s/-/-${meta_version}./2"
 }
 
 initialize-tag ()
@@ -653,6 +659,7 @@ build-zfs-rpms ()
     pushd "${params[repo-path]}" >/dev/null || return $?
 
     $GIT_CMD clean -fdx || return $?
+    $SED_CMD -i -e 's/ --dirty//' config/zfs-meta.m4
     ./autogen.sh || return $?
     ./configure PYTHON="$PYTHON_CMD" PYTHON_VERSION="$PYTHON_CMD_VERSION" \
         || return $?
