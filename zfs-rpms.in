@@ -483,7 +483,7 @@ sync-zfs-repo ()
         uncommited_string=$(
             $GIT_CMD -C "${params[repo-path]}" status -s |
                 $GREP_CMD -E '^ *M'
-                  ) || return $?
+                  ) || true
         mapfile -t uncommited <<<"$uncommited_string"
         if (( ${#uncommited[*]} )); then
             printf "Uncommited changes:\n" >&2
